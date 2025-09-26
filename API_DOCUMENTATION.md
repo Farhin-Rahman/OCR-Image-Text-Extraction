@@ -1,15 +1,15 @@
 # OCR API Documentation
 
 ## Base URL
-[Will be updated after deployment]
+https://helpful-balance-production-e085.up.railway.app
+# Health check
+curl https://helpful-balance-production-e085.up.railway.app/
 
-## Endpoints
+# Single image
+curl -X POST -F "image=@test.jpg" https://helpful-balance-production-e085.up.railway.app/extract-text
 
-1. GET / - Health check
-2. POST /extract-text - Extract text from single image
-3. POST /batch-extract - Extract text from multiple images
-
-## Example Usage
-```bash
-curl -X POST -F "image=@test.jpg" https://your-url/extract-text
-
+# Batch processing
+curl -X POST \
+  -F "images=@img1.jpg" \
+  -F "images=@img2.png" \
+  https://helpful-balance-production-e085.up.railway.app/batch-extract
