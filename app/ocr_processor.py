@@ -5,6 +5,7 @@ import re
 import pytesseract
 from PIL import Image
 from pytesseract import Output
+from typing import Tuple, Optional
 
 def preprocess_text(text: str) -> str:
     """
@@ -57,7 +58,7 @@ def preprocess_text(text: str) -> str:
     
     return text
 
-def process_image_with_ocr(image_bytes: bytes) -> tuple[str, float | None]:
+def process_image_with_ocr(image_bytes: bytes) -> Tuple[str, Optional[float]]:
     """
     Processes image bytes using Tesseract OCR, extracting text and average confidence.
 
