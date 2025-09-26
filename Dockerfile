@@ -21,7 +21,8 @@ WORKDIR /app
 # Install Tesseract OCR and remove the package manager cache to keep the image small
 # --no-install-recommends avoids installing extra, unnecessary packages
 RUN apt-get update && \
-    apt-get install -y tesseract-ocr --no-install-recommends && \
+    apt-get install -y tesseract-ocr tesseract-ocr-eng --no-install-recommends && \
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy the pre-built Python packages from the builder stage
@@ -32,6 +33,9 @@ RUN pip install --no-cache /wheels/*
 # Copy only the application code into the final image
 COPY ./app ./app
 
+# Pre-compile Python files for faster starts
+RUN python -m compileall app/
+
 # Create a non-root user for security best practices
 RUN useradd --create-home appuser
 USER appuser
@@ -40,4 +44,4 @@ USER appuser
 EXPOSE 8080
 
 # The command to run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]

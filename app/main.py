@@ -2,6 +2,8 @@
 
 import time
 import hashlib
+from typing import List
+import asyncio
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from starlette.status import HTTP_413_REQUEST_ENTITY_TOO_LARGE, HTTP_415_UNSUPPORTED_MEDIA_TYPE, HTTP_429_TOO_MANY_REQUESTS
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -41,6 +43,11 @@ async def read_root():
     """A simple health check endpoint."""
     return {"status": "ok", "message": "Enhanced OCR API is running!"}
 
+@app.get("/health", tags=["Health Check"])
+async def health_check():
+    """Health check for deployment platforms"""
+    return {"status": "healthy"}
+
 @app.post("/extract-text", tags=["OCR"])
 @limiter.limit("5/minute")
 async def extract_text_from_image(request: Request, image: UploadFile = File(...)):
@@ -68,7 +75,7 @@ async def extract_text_from_image(request: Request, image: UploadFile = File(...
     # --- 3. Caching Logic ---
     image_hash = hashlib.sha256(contents).hexdigest()
     if image_hash in _cache:
-        cached_result = _cache[image_hash]
+        cached_result = _cache[image_hash].copy()  # Use copy() to avoid modifying cache
         cached_result["processing_time_ms"] = round((time.time() - start_time) * 1000)
         cached_result["cached"] = True
         return cached_result
@@ -115,6 +122,103 @@ async def extract_text_from_image(request: Request, image: UploadFile = File(...
         }
 
     # Store the result in the cache before returning
-    _cache[image_hash] = response_data
+    _cache[image_hash] = response_data.copy()
     
     return response_data
+
+@app.post("/batch-extract", tags=["OCR"])
+@limiter.limit("2/minute")  # Lower rate limit for batch operations
+async def batch_extract_text(request: Request, images: List[UploadFile] = File(...)):
+    """
+    Batch process multiple images and extract text from each.
+    Maximum 5 images per request.
+    """
+    start_time = time.time()
+    
+    # Validate number of files
+    if len(images) > 5:
+        raise HTTPException(
+            status_code=400,
+            detail="Maximum 5 images allowed per batch request"
+        )
+    
+    # Process all images concurrently
+    async def process_single_image(image: UploadFile, index: int):
+        try:
+            # Validate file type
+            if image.content_type not in ACCEPTED_FILE_TYPES:
+                return {
+                    "index": index,
+                    "filename": image.filename,
+                    "success": False,
+                    "error": f"Unsupported format. Supported formats are: {', '.join(ACCEPTED_FILE_TYPES)}"
+                }
+            
+            # Read and validate size
+            contents = await image.read()
+            if len(contents) > MAX_FILE_SIZE:
+                return {
+                    "index": index,
+                    "filename": image.filename,
+                    "success": False,
+                    "error": "File size exceeds the limit of 10MB."
+                }
+            
+            # Check cache
+            image_hash = hashlib.sha256(contents).hexdigest()
+            if image_hash in _cache:
+                cached_result = _cache[image_hash].copy()
+                return {
+                    "index": index,
+                    "filename": image.filename,
+                    "success": True,
+                    "text": cached_result.get("text", ""),
+                    "confidence": cached_result.get("confidence"),
+                    "cached": True
+                }
+            
+            # Process with OCR
+            extracted_text, confidence = ocr_processor.process_image_with_ocr(contents)
+            
+            # Cache the result
+            result = {
+                "text": extracted_text,
+                "confidence": confidence
+            }
+            _cache[image_hash] = result
+            
+            return {
+                "index": index,
+                "filename": image.filename,
+                "success": True,
+                "text": extracted_text if extracted_text else "",
+                "confidence": confidence,
+                "cached": False,
+                "message": "No text found in the image." if not extracted_text else None
+            }
+            
+        except Exception as e:
+            return {
+                "index": index,
+                "filename": image.filename,
+                "success": False,
+                "error": str(e)
+            }
+    
+    # Process all images concurrently
+    tasks = [process_single_image(image, i) for i, image in enumerate(images)]
+    results = await asyncio.gather(*tasks)
+    
+    processing_time_ms = round((time.time() - start_time) * 1000)
+    
+    # Count successes
+    successful = sum(1 for r in results if r["success"])
+    
+    return {
+        "success": True,
+        "total_images": len(images),
+        "successful": successful,
+        "failed": len(images) - successful,
+        "processing_time_ms": processing_time_ms,
+        "results": results
+    }
